@@ -5,44 +5,30 @@ import 'package:aq_schema/tools.dart';
 
 /// Tool Registry client.
 final class ToolRegistryClient implements IAQToolRegistrySimple {
-  final Map<String, List<ToolRecord>> _records = {};
+  IToolRepository get _repo => IToolRepository.instance;
 
   @override
-  Future<void> register(ToolRecord record) async {
-    final key = record.id;
-    _records.putIfAbsent(key, () => []).add(record);
-  }
+  Future<void> register(ToolRecord record) => _repo.save(record);
 
   @override
   Future<ToolContract> resolve(ToolRef ref) async {
     final key = ref.namespace != null ? '${ref.namespace}/${ref.name}' : ref.name;
-    final records = _records[key];
 
-    if (records == null || records.isEmpty) {
-      throw ToolNotFoundException(ref);
+    if (ref.exactVersion != null) {
+      final versions = await _repo.findVersions(key);
+      final match = versions.where((r) => r.version == ref.exactVersion).firstOrNull;
+      if (match == null) throw ToolVersionNotFoundException(key, ref.exactVersion!);
+      return match.contract;
     }
 
-    final record = ref.exactVersion != null
-        ? _findVersion(records, ref.exactVersion!)
-        : records.last; // Latest
-
+    final record = await _repo.findById(key);
+    if (record == null) throw ToolNotFoundException(ref);
     return record.contract;
   }
 
   @override
-  Future<List<ToolRecord>> list({String? namespace}) async {
-    final all = _records.values.expand((list) => list).toList();
-    if (namespace == null) return all;
-    return all.where((r) => r.id.startsWith('$namespace/')).toList();
-  }
-
-  ToolRecord _findVersion(List<ToolRecord> records, Semver version) {
-    final match = records.where((r) => r.version == version).firstOrNull;
-    if (match == null) {
-      throw ToolVersionNotFoundException(records.first.id, version);
-    }
-    return match;
-  }
+  Future<List<ToolRecord>> list({String? namespace}) =>
+      _repo.findAll(namespace: namespace);
 }
 
 final class ToolNotFoundException implements Exception {
